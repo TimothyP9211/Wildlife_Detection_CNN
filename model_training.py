@@ -12,6 +12,7 @@ import os
 from tqdm import tqdm
 
 def match_bboxes(IoU, threshold=0.5):
+    # Matches predicted boxes to target boxes above a set threshold
     matches = []
     matched_pred = set()
     matched_target = set()
@@ -38,7 +39,26 @@ def match_bboxes(IoU, threshold=0.5):
     
     return matches
 
-# Perform a single training epoch
+def match_bboxes_best(IoU):
+    # Matches each target box to the predicted box with the highest IoU without a threshold
+    matches = []
+    if IoU.numel() == 0:
+        return matches
+
+    num_pred_boxes, num_target_boxes = IoU.shape
+
+    used_preds = set()
+    for target_idx in range(num_target_boxes):
+        best_pred_idx = torch.argmax(IoU[:, target_idx]).item()
+        best_iou = IoU[best_pred_idx, target_idx].item()
+
+        if best_pred_idx not in used_preds:
+            matches.append((best_pred_idx, target_idx, best_iou))
+            used_preds.add(best_pred_idx)
+
+    return matches
+
+# Train over one epoch
 def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
           reg_criterion, class_criterion, objectness_criterion, train_loss_logger):
     model.train()
@@ -56,8 +76,8 @@ def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
 
         # Iterate over the batch and compute loss for bounding boxes and labels
         for i in range(batch_size):
-            iou = iou_module(pred_bboxes[i], target_bboxes[i])
-            matches = match_bboxes(iou, threshold=threshold)
+            IoU = iou_module(pred_bboxes[i], target_bboxes[i])
+            matches = match_bboxes(IoU, threshold=threshold)
 
             for pred_idx, target_idx, iou_score in matches:
                 # Object found in this box
@@ -90,6 +110,7 @@ def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
     avg_loss = running_loss / len(dataLoader)
     return avg_loss
 
+# Evaluate over one epoch
 def evaluate_model(model, dataLoader, device, iou_module, threshold):
     model.eval()
     # TODO: Implement evaluation logic
