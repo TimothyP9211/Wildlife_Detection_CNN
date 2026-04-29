@@ -25,7 +25,7 @@ class DetectorModel(nn.Module):
 			Sigmoid()
         )
 
-        # Classifier to produce output label of image in bounding box, use dropout to combat overfitting
+        # Classifier to produce output label of image in bounding box, using dropout to combat overfitting
         self.classifier = Sequential(
 			Linear(features, 512),
 			ReLU(),
