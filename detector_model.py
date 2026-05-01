@@ -6,6 +6,7 @@ class DetectorModel(nn.Module):
     def __init__(self, baseModel, numClasses, numBBoxes):
         super(DetectorModel, self).__init__()
         
+        # Model params
         self.baseModel = baseModel
         self.numClasses = numClasses
         self.numBBoxes = numBBoxes

@@ -15,7 +15,7 @@ class CustomDataset(Dataset):
         self.labels_dir = Path(labels_dir)
         self.image_paths = sorted([
             p for p in self.images_dir.iterdir()
-            if p.suffix.lower() in [".jpg", ".jpeg", ".png"]
+            if p.suffix.lower() in [".jpg", ".png"]
         ])
 
         # Transformation to resize images (default 224x224 used by resnet50)
@@ -32,6 +32,7 @@ class CustomDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
+        # Open the image and apply transformations
         image_path = self.image_paths[idx]
         image = Image.open(image_path).convert("RGB")
         image = self.transform(image)
@@ -61,6 +62,7 @@ class CustomDataset(Dataset):
                     boxes.append([x_min, y_min, width, height])
                     labels.append(class_id)
 
+        # Convert lists to tensors
         boxes = torch.tensor(boxes, dtype=torch.float32)
         labels = torch.tensor(labels, dtype=torch.long)
 

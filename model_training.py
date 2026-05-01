@@ -1,3 +1,5 @@
+from os import path
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -5,7 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.ops import nms
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
-from torchvision.models import resnet50
+from torchvision.models import ResNet50_Weights, resnet50
 
 import numpy as np
 import os
@@ -16,6 +18,8 @@ from detector_model import DetectorModel
 from IoU import IoUModule
 from dataset import CustomDataset
 from PIL import Image
+from PIL import ImageDraw
+from img_draw import DrawModule
 
 def match_bboxes(IoU, threshold=0.5):
     # Matches predicted boxes to target boxes above a set threshold
@@ -103,7 +107,7 @@ def train_model(model, dataLoader, optimizer, device, iou_module,
 
                 # Compute regression and classification loss for this matched box
                 reg_loss += reg_criterion(pred_bboxes[i, pred_idx], real_target_bboxes[target_idx])
-                class_loss += class_criterion(class_logits[i, pred_idx], real_target_labels[target_idx])
+                class_loss += class_criterion(class_logits[i, pred_idx].unsqueeze(0), real_target_labels[target_idx].unsqueeze(0))
                 match_count += 1
 
         # If no matches, then train only for objectness loss
@@ -116,7 +120,7 @@ def train_model(model, dataLoader, optimizer, device, iou_module,
         
         objectness_loss = objectness_criterion(objectness_logits, object_exists)
 
-        loss = reg_loss + class_loss + objectness_loss
+        loss = 5* reg_loss + class_loss + objectness_loss
 
         # Backpropagation and optimization step
         loss.backward()
@@ -180,7 +184,7 @@ def evaluate_model(model, dataLoader, device, iou_module, threshold,
             
             objectness_loss = objectness_criterion(objectness_logits, object_exists)
 
-            loss = reg_loss + class_loss + objectness_loss
+            loss = 5 * reg_loss + class_loss + objectness_loss
             running_loss += loss.item()
 
             # Log average per batch val loss for plotting
@@ -211,14 +215,39 @@ def multibox_collate(batch):
 
     return images, padded_bboxes, padded_labels
 
+# Draw the bounding boxes for a single image from the test set
+def output_test_image(test_path, model, device, transform, drawmodule, idx, threshold=0.5):
+    test_image = Image.open(test_path).convert("RGB")
+
+    with torch.no_grad():
+        input_tensor = transform(test_image).unsqueeze(0).to(device)
+        pred_bboxes, class_logits, objectness_logits = model(input_tensor)  
+
+    pred_bboxes = pred_bboxes[0]                 
+    class_logits = class_logits[0]               
+    objectness_logits = objectness_logits[0]
+
+    objectness_scores = torch.sigmoid(objectness_logits).squeeze(-1)
+    class_probs = torch.softmax(class_logits, dim=-1)
+    class_scores, class_labels = torch.max(class_probs, dim=-1)
+    final_scores = objectness_scores * class_scores
+    kept_indices = final_scores > threshold
+
+    final_bboxes = pred_bboxes[kept_indices]
+    final_labels = class_labels[kept_indices]
+    final_scores = final_scores[kept_indices]
+
+    drawmodule.draw_predictions(test_path, final_bboxes, final_labels, final_scores, output_path=f"output/test_output_{idx}.jpg")
+
+
 def main():
     # Dataset specific parameters
     num_classes = 5
-    num_bboxes = 8
-    threshold = 0.5
+    num_bboxes = 4
+    threshold = 0.35
 
     # Base model for feature extraction
-    resnet = resnet50(pretrained=True)
+    resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
 
     # Initialize detector model and use cuda for faster training if available
     model = DetectorModel(baseModel=resnet, numClasses=num_classes, numBBoxes=num_bboxes)
@@ -227,7 +256,7 @@ def main():
     model.to(device)
 
     # Adam optimizer with dynamic lr
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95)
 
     iou_module = IoUModule().to(device)
@@ -264,7 +293,7 @@ def main():
         scheduler.step()
         print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
-    # Run the model on a test image
+    # Run the model on the test images and draw the outputs
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -274,30 +303,22 @@ def main():
         )
     ])
 
-    # test on one image
-    test_image = Image.open(f"{dataset_root}/images/test/img_0308.jpg").convert("RGB")
-    with torch.no_grad():
-        input_tensor = transform(test_image).unsqueeze(0).to(device)
-        pred_bboxes, class_logits, objectness_logits = model(input_tensor)  
+    drawmodule = DrawModule()
+    test_names = []
+    test_folder = f"{dataset_root}/images/test"
+    for filename in os.listdir(test_folder):
+        if filename.lower().endswith((".jpg",".png")):
+            test_names.append(filename)
 
-    pred_bboxes = pred_bboxes[0]                 
-    class_logits = class_logits[0]               
-    objectness_logits = objectness_logits[0]
+    for name in test_names:
+        test_path = os.path.join(test_folder, name)
+        output_test_image(test_path, model, device, transform, drawmodule, idx=name.split(".")[0], threshold=threshold)
 
-    objectness_scores = torch.sigmoid(objectness_logits).squeeze(-1)
-    class_probs = torch.softmax(class_logits, dim=-1)
-    class_scores, class_labels = torch.max(class_probs, dim=-1)
-    final_scores = objectness_scores * class_scores
-    kept_indices = final_scores > threshold
-
-    final_bboxes = pred_bboxes[kept_indices]
-    final_labels = class_labels[kept_indices]
-    final_scores = final_scores[kept_indices]
-
-    print("Predicted Classes and Scores:")
-    print("Boxes: ", final_bboxes)
-    print("Labels: ", final_labels)
-    print("Scores: ", final_scores)
+    # plt.plot(train_loss_logger, label = "training losses")
+    # plt.plot(val_loss_logger, label = "validation losses")
+    # plt.legend()
+    # plt.title("losses over epoch")
+    # plt.show()
 
     return
 
