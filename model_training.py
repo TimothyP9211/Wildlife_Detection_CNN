@@ -15,6 +15,7 @@ from tqdm import tqdm
 from detector_model import DetectorModel
 from IoU import IoUModule
 from dataset import CustomDataset
+from PIL import Image
 
 def match_bboxes(IoU, threshold=0.5):
     # Matches predicted boxes to target boxes above a set threshold
@@ -249,11 +250,12 @@ def main():
         labels_dir=f"{dataset_root}/labels/val",
         image_size=224
     )
+
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=multibox_collate)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, collate_fn=multibox_collate)
 
     # Training loop
-    num_epochs = 40
+    num_epochs = 20
     for epoch in range(num_epochs):
         train_loss = train_model(model, train_loader, optimizer, device, iou_module,
                                  reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=epoch+1)
@@ -261,6 +263,41 @@ def main():
                                   reg_criterion, class_criterion, objectness_criterion, val_loss_logger, epoch=epoch+1)
         scheduler.step()
         print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
+
+    # Run the model on a test image
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+    ])
+
+    # test on one image
+    test_image = Image.open(f"{dataset_root}/images/test/img_0308.jpg").convert("RGB")
+    with torch.no_grad():
+        input_tensor = transform(test_image).unsqueeze(0).to(device)
+        pred_bboxes, class_logits, objectness_logits = model(input_tensor)  
+
+    pred_bboxes = pred_bboxes[0]                 
+    class_logits = class_logits[0]               
+    objectness_logits = objectness_logits[0]
+
+    objectness_scores = torch.sigmoid(objectness_logits).squeeze(-1)
+    class_probs = torch.softmax(class_logits, dim=-1)
+    class_scores, class_labels = torch.max(class_probs, dim=-1)
+    final_scores = objectness_scores * class_scores
+    kept_indices = final_scores > threshold
+
+    final_bboxes = pred_bboxes[kept_indices]
+    final_labels = class_labels[kept_indices]
+    final_scores = final_scores[kept_indices]
+
+    print("Predicted Classes and Scores:")
+    print("Boxes: ", final_bboxes)
+    print("Labels: ", final_labels)
+    print("Scores: ", final_scores)
 
     return
 

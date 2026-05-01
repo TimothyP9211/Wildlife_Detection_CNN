@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.nn import *
 
 class IoUModule(nn.Module):
+    # Computes the Intersection over Union of predicted and target bounding boxes
     def __init__(self):
         super(IoUModule, self).__init__()
     

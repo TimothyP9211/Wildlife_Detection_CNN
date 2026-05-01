@@ -8,6 +8,8 @@ from torchvision import transforms
 
 
 class CustomDataset(Dataset):
+    # Dataset in YOLO format: images and labels in seperate folders split into train/val/test with labels in .txt format
+
     def __init__(self, images_dir, labels_dir, image_size=224):
         self.images_dir = Path(images_dir)
         self.labels_dir = Path(labels_dir)
@@ -16,6 +18,7 @@ class CustomDataset(Dataset):
             if p.suffix.lower() in [".jpg", ".jpeg", ".png"]
         ])
 
+        # Transformation to resize images (default 224x224 used by resnet50)
         self.transform = transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
@@ -34,7 +37,6 @@ class CustomDataset(Dataset):
         image = self.transform(image)
 
         label_path = self.labels_dir / f"{image_path.stem}.txt"
-
         boxes = []
         labels = []
 
