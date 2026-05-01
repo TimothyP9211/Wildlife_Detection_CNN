@@ -60,7 +60,7 @@ def match_bboxes_best(IoU):
 
 # Train over one epoch
 def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
-          reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch):
+          reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=None):
     model.train()
     running_loss = 0.0
 
@@ -84,7 +84,8 @@ def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
         # Iterate over the batch and compute loss for bounding boxes and labels
         for i in range(batch_size):
             IoU = iou_module(pred_bboxes[i], target_bboxes[i])
-            matches = match_bboxes(IoU, threshold=threshold)
+            # Match bounding boxes without thresholding since early predictions may be poor
+            matches = match_bboxes_best(IoU)
 
             for pred_idx, target_idx, iou_score in matches:
                 # Object found in this box
@@ -120,7 +121,7 @@ def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
 
 # Validate over one epoch
 def evaluate_model(model, dataLoader, device, iou_module, threshold,
-                reg_criterion, class_criterion, objectness_criterion, val_loss_logger, epoch):
+                reg_criterion, class_criterion, objectness_criterion, val_loss_logger, epoch=None):
     model.eval()
     running_loss = 0.0
     with torch.no_grad():
@@ -137,6 +138,7 @@ def evaluate_model(model, dataLoader, device, iou_module, threshold,
             # Iterate over the batch and compute loss for bounding boxes and labels
             for i in range(batch_size):
                 IoU = iou_module(pred_bboxes[i], target_bboxes[i])
+                # Use thresholded matching for evaluation to reflect actual performance at a given IoU threshold
                 matches = match_bboxes(IoU, threshold=threshold)
 
                 for pred_idx, target_idx, iou_score in matches:
