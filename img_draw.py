@@ -22,7 +22,7 @@ class DrawModule():
         for box, label, score in zip(pixel_boxes, labels.cpu(), scores.cpu()):
             x, y, w, h = box.tolist()
             draw.rectangle([x, y, x + w, y + h],outline="red",width=3)
-            draw.text((x, y),f"class {label.item()} {score.item():.2f}",fill="red")
+            draw.text((x, y),f"class {label.item()} {score.item():.8f}",fill="red")
 
         image.save(output_path)
         print(f"Saved prediction to {output_path}")

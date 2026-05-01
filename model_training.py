@@ -120,7 +120,7 @@ def train_model(model, dataLoader, optimizer, device, iou_module,
         
         objectness_loss = objectness_criterion(objectness_logits, object_exists)
 
-        loss = 5* reg_loss + class_loss + objectness_loss
+        loss = 4 * reg_loss + class_loss + objectness_loss
 
         # Backpropagation and optimization step
         loss.backward()
@@ -171,7 +171,7 @@ def evaluate_model(model, dataLoader, device, iou_module, threshold,
 
                     # Compute regression and classification loss for this matched box
                     reg_loss += reg_criterion(pred_bboxes[i, pred_idx], real_target_bboxes[target_idx])
-                    class_loss += class_criterion(class_logits[i, pred_idx], real_target_labels[target_idx])
+                    class_loss += class_criterion(class_logits[i, pred_idx].unsqueeze(0), real_target_labels[target_idx].unsqueeze(0))
                     match_count += 1
 
             # If no matches, then train only for objectness loss
@@ -184,7 +184,7 @@ def evaluate_model(model, dataLoader, device, iou_module, threshold,
             
             objectness_loss = objectness_criterion(objectness_logits, object_exists)
 
-            loss = 5 * reg_loss + class_loss + objectness_loss
+            loss = 4 * reg_loss + class_loss + objectness_loss
             running_loss += loss.item()
 
             # Log average per batch val loss for plotting
@@ -242,9 +242,9 @@ def output_test_image(test_path, model, device, transform, drawmodule, idx, thre
 
 def main():
     # Dataset specific parameters
-    num_classes = 5
-    num_bboxes = 4
-    threshold = 0.35
+    num_classes = 11
+    num_bboxes = 8
+    threshold = 0.4
 
     # Base model for feature extraction
     resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -284,7 +284,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, collate_fn=multibox_collate)
 
     # Training loop
-    num_epochs = 20
+    num_epochs = 10
     for epoch in range(num_epochs):
         train_loss = train_model(model, train_loader, optimizer, device, iou_module,
                                  reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=epoch+1)
