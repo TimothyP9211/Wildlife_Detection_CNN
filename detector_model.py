@@ -21,7 +21,7 @@ class DetectorModel(nn.Module):
 			ReLU(),
 			Linear(64, 32),
 			ReLU(),
-			Linear(32, 4 * numBBoxes),
+			Linear(32, 4 * self.numBBoxes),
 			Sigmoid()
         )
 
@@ -33,14 +33,14 @@ class DetectorModel(nn.Module):
 			Linear(512, 512),
 			ReLU(),
 			Dropout(),
-			Linear(512, self.numClasses * numBBoxes)
+			Linear(512, self.numClasses * self.numBBoxes)
 		)
 
-        # Objectness classifier to determine whether there is actually an object in the bounding box
+        # Objectness binary classifier to determine whether there is actually an object in the bounding box
         self.objectness_classifier = Sequential(
             Linear(features, 128),
             ReLU(),
-            Linear(128, numBBoxes),
+            Linear(128, self.numBBoxes),
         )
 
     def forward(self, x):

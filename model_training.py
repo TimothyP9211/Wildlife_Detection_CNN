@@ -5,11 +5,16 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.ops import nms
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
+from torchvision.models import resnet50
 
 import numpy as np
 import os
 
 from tqdm import tqdm
+
+from detector_model import DetectorModel
+from IoU import IoUModule
+from dataset import CustomDataset
 
 def match_bboxes(IoU, threshold=0.5):
     # Matches predicted boxes to target boxes above a set threshold
@@ -59,7 +64,7 @@ def match_bboxes_best(IoU):
     return matches
 
 # Train over one epoch
-def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
+def train_model(model, dataLoader, optimizer, device, iou_module,
           reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=None):
     model.train()
     running_loss = 0.0
@@ -83,8 +88,12 @@ def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
 
         # Iterate over the batch and compute loss for bounding boxes and labels
         for i in range(batch_size):
-            IoU = iou_module(pred_bboxes[i], target_bboxes[i])
-            # Match bounding boxes without thresholding since early predictions may be poor
+            # Ignore padded boxes
+            real_target_bboxes = target_bboxes[i][target_labels[i] != -1]
+            real_target_labels = target_labels[i][target_labels[i] != -1]
+
+            IoU = iou_module(pred_bboxes[i], real_target_bboxes)
+            # Match bounding boxes without thresholding since early predictions may suck
             matches = match_bboxes_best(IoU)
 
             for pred_idx, target_idx, iou_score in matches:
@@ -92,8 +101,8 @@ def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
                 object_exists[i, pred_idx] = 1
 
                 # Compute regression and classification loss for this matched box
-                reg_loss += reg_criterion(pred_bboxes[i, pred_idx], target_bboxes[i, target_idx])
-                class_loss += class_criterion(class_logits[i, pred_idx], target_labels[i, target_idx])
+                reg_loss += reg_criterion(pred_bboxes[i, pred_idx], real_target_bboxes[target_idx])
+                class_loss += class_criterion(class_logits[i, pred_idx], real_target_labels[target_idx])
                 match_count += 1
 
         # If no matches, then train only for objectness loss
@@ -116,16 +125,22 @@ def train_model(model, dataLoader, optimizer, device, iou_module, threshold,
         # Log average per batch train loss for plotting
         train_loss_logger.append(running_loss / (batch_idx + 1))
     
-    avg_loss = running_loss / len(dataLoader)
-    return avg_loss
+    return running_loss / len(dataLoader)
 
 # Validate over one epoch
 def evaluate_model(model, dataLoader, device, iou_module, threshold,
                 reg_criterion, class_criterion, objectness_criterion, val_loss_logger, epoch=None):
     model.eval()
     running_loss = 0.0
+
+    # tqdm for visualizing progress
+    if epoch is not None:
+        loop = tqdm(dataLoader, desc=f"Validation Epoch {epoch}", leave=True)
+    else:
+        loop = tqdm(dataLoader, desc="Validation", leave=True)
+
     with torch.no_grad():
-        for batch_idx, (images, target_bboxes, target_labels) in enumerate(dataLoader):
+        for batch_idx, (images, target_bboxes, target_labels) in enumerate(loop):
             images, target_bboxes, target_labels = images.to(device), target_bboxes.to(device), target_labels.to(device).long()
             pred_bboxes, class_logits, objectness_logits = model(images)
 
@@ -137,7 +152,11 @@ def evaluate_model(model, dataLoader, device, iou_module, threshold,
 
             # Iterate over the batch and compute loss for bounding boxes and labels
             for i in range(batch_size):
-                IoU = iou_module(pred_bboxes[i], target_bboxes[i])
+                # Ignore padded boxes
+                real_target_bboxes = target_bboxes[i][target_labels[i] != -1]
+                real_target_labels = target_labels[i][target_labels[i] != -1]
+
+                IoU = iou_module(pred_bboxes[i], real_target_bboxes)
                 # Use thresholded matching for evaluation to reflect actual performance at a given IoU threshold
                 matches = match_bboxes(IoU, threshold=threshold)
 
@@ -146,8 +165,8 @@ def evaluate_model(model, dataLoader, device, iou_module, threshold,
                     object_exists[i, pred_idx] = 1
 
                     # Compute regression and classification loss for this matched box
-                    reg_loss += reg_criterion(pred_bboxes[i, pred_idx], target_bboxes[i, target_idx])
-                    class_loss += class_criterion(class_logits[i, pred_idx], target_labels[i, target_idx])
+                    reg_loss += reg_criterion(pred_bboxes[i, pred_idx], real_target_bboxes[target_idx])
+                    class_loss += class_criterion(class_logits[i, pred_idx], real_target_labels[target_idx])
                     match_count += 1
 
             # If no matches, then train only for objectness loss
@@ -166,8 +185,83 @@ def evaluate_model(model, dataLoader, device, iou_module, threshold,
             # Log average per batch val loss for plotting
             val_loss_logger.append(running_loss / (batch_idx + 1))
 
+    return running_loss / len(dataLoader)
+
+# Custom collate function to pad batches since images have varying numbers of bboxes
+def multibox_collate(batch):
+    images, boxes, labels = zip(*batch)
+    images = torch.stack(images, dim=0)
+    batch_size = len(boxes)
+    max_num_bboxes = max(b.shape[0] for b in boxes)
+
+    # Image has no boxes
+    if max_num_bboxes == 0:
+        max_num_bboxes = 1
+
+    # Pad labels with -1 for ignored boxes
+    padded_bboxes = torch.zeros((batch_size, max_num_bboxes, 4), dtype=torch.float32)
+    padded_labels = torch.full((batch_size, max_num_bboxes), -1, dtype=torch.long)
+
+    for i in range(batch_size):
+        num_bboxes = boxes[i].shape[0]
+        if num_bboxes > 0:
+            padded_bboxes[i, :num_bboxes] = boxes[i]
+            padded_labels[i, :num_bboxes] = labels[i]
+
+    return images, padded_bboxes, padded_labels
+
 def main():
-    # TODO: Load dataset, train, evaluate, export model
+    # Dataset specific parameters
+    num_classes = 5
+    num_bboxes = 8
+    threshold = 0.5
+
+    # Base model for feature extraction
+    resnet = resnet50(pretrained=True)
+
+    # Initialize detector model and use cuda for faster training if available
+    model = DetectorModel(baseModel=resnet, numClasses=num_classes, numBBoxes=num_bboxes)
+    print(f"cuda available: {torch.cuda.is_available()}")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # Adam optimizer with dynamic lr
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95)
+
+    iou_module = IoUModule().to(device)
+    train_loss_logger, val_loss_logger = [], []
+
+    # Loss functions for each part of detection pipeline
+    reg_criterion = nn.SmoothL1Loss()
+    class_criterion = nn.CrossEntropyLoss()
+    objectness_criterion = nn.BCEWithLogitsLoss()
+
+    # Dataset initialization 
+    dataset_root = "detect_dataset"
+    train_dataset = CustomDataset(
+        images_dir=f"{dataset_root}/images/train",
+        labels_dir=f"{dataset_root}/labels/train",
+        image_size=224
+    )
+    val_dataset = CustomDataset(
+        images_dir=f"{dataset_root}/images/val",
+        labels_dir=f"{dataset_root}/labels/val",
+        image_size=224
+    )
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=multibox_collate)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, collate_fn=multibox_collate)
+
+    # Training loop
+    num_epochs = 40
+    for epoch in range(num_epochs):
+        train_loss = train_model(model, train_loader, optimizer, device, iou_module,
+                                 reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=epoch+1)
+        val_loss = evaluate_model(model, val_loader, device, iou_module, threshold,
+                                  reg_criterion, class_criterion, objectness_criterion, val_loss_logger, epoch=epoch+1)
+        scheduler.step()
+        print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
+
     return
 
 if __name__ == "__main__":
