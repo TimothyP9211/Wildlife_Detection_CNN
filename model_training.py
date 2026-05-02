@@ -244,7 +244,7 @@ def main():
     # Dataset specific parameters
     num_classes = 11
     num_bboxes = 8
-    threshold = 0.4
+    threshold = 0.45
 
     # Base model for feature extraction
     resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -303,6 +303,7 @@ def main():
         )
     ])
 
+    # Draw bounding boxes for model predictions and export to output folder
     drawmodule = DrawModule()
     test_names = []
     test_folder = f"{dataset_root}/images/test"
