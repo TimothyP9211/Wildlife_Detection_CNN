@@ -10,7 +10,7 @@ from torchvision import transforms
 class CustomDataset(Dataset):
     # Dataset in YOLO format: images and labels in seperate folders split into train/val/test with labels in .txt format
 
-    def __init__(self, images_dir, labels_dir, image_size=224):
+    def __init__(self, images_dir, labels_dir, transform=None, image_size=224):
         self.images_dir = Path(images_dir)
         self.labels_dir = Path(labels_dir)
         self.image_paths = sorted([
@@ -19,7 +19,7 @@ class CustomDataset(Dataset):
         ])
 
         # Transformation to resize images (default 224x224 used by resnet50)
-        self.transform = transforms.Compose([
+        self.transform = transform if transform is not None else transforms.Compose([
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
             transforms.Normalize(

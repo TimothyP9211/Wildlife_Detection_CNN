@@ -267,16 +267,33 @@ def main():
     class_criterion = nn.CrossEntropyLoss()
     objectness_criterion = nn.BCEWithLogitsLoss()
 
+    
     # Dataset initialization 
+
+    # Augmentation for training set, does not alter bounding boxes (ie no geometric transforms)
+    train_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.color_jitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.RandomAutocontrast(p=0.3),
+        transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.3),
+        transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )])
+
     dataset_root = "detect_dataset"
     train_dataset = CustomDataset(
         images_dir=f"{dataset_root}/images/train",
         labels_dir=f"{dataset_root}/labels/train",
+        transform=train_transform,
         image_size=224
     )
     val_dataset = CustomDataset(
         images_dir=f"{dataset_root}/images/val",
         labels_dir=f"{dataset_root}/labels/val",
+        transform=None,
         image_size=224
     )
 
