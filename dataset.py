@@ -9,6 +9,7 @@ from torchvision import transforms
 
 class CustomDataset(Dataset):
     # Dataset in YOLO format: images and labels in seperate folders split into train/val/test with labels in .txt format
+    # txt format: (class_id x_center y_center width height) normalized to [0, 1]
 
     def __init__(self, images_dir, labels_dir, transform=None, image_size=224):
         self.images_dir = Path(images_dir)

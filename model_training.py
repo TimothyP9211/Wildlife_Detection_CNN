@@ -244,7 +244,7 @@ def main():
     # Dataset specific parameters
     num_classes = 11
     num_bboxes = 8
-    threshold = 0.45
+    threshold = 0.5
 
     # Base model for feature extraction
     resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -267,13 +267,12 @@ def main():
     class_criterion = nn.CrossEntropyLoss()
     objectness_criterion = nn.BCEWithLogitsLoss()
 
-    
     # Dataset initialization 
 
     # Augmentation for training set, does not alter bounding boxes (ie no geometric transforms)
     train_transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.color_jitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
         transforms.RandomAutocontrast(p=0.3),
         transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.3),
         transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0)),
