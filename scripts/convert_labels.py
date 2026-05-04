@@ -1,3 +1,8 @@
+"""
+Replaces class IDs of YOLO labels with a set class for consistency across merged datasets
+
+"""
+
 from pathlib import Path
 
 def replace_yolo_class_ids(labels_dir, new_class_id):
@@ -29,7 +34,7 @@ def replace_yolo_class_ids(labels_dir, new_class_id):
         with open(label_path, "w", encoding="utf-8") as f:
             f.write("\n".join(new_lines) + "\n")
 
-        print(f"Updated {label_path}")
+        print(f"Updated {label_path} to label class {new_class_id}")
 
 
 if __name__ == "__main__":
@@ -39,6 +44,7 @@ if __name__ == "__main__":
     # labels_directory = "detect_dataset/fox/labels"
     # labels_directory = "detect_dataset/moose/labels"
     # labels_directory = "detect_dataset/wolf/labels"
+    # labels_directory = "tmp_labels/"
     labels_directory = "detect_dataset/squirrel/labels"
     class_id_to_use = 6
 
