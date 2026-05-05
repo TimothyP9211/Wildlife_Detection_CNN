@@ -250,7 +250,7 @@ def multibox_collate(batch):
 
     return images, padded_bboxes, padded_labels
 
-# Draw the bounding boxes for a single image from the test set
+# Draw the bounding boxes for a single image from the test set and save the output
 def output_test_image(test_path, model, device, transform, drawmodule, idx, threshold):
     test_image = Image.open(test_path).convert("RGB")
 
@@ -277,7 +277,7 @@ def output_test_image(test_path, model, device, transform, drawmodule, idx, thre
 
 def main():
     # Dataset specific parameters
-    num_classes = 11
+    num_classes = 7
     num_bboxes = 8
     threshold = 0.4
 
@@ -367,6 +367,8 @@ def main():
         test_path = os.path.join(test_folder, name)
         output_test_image(test_path, model, device, transform, drawmodule, idx=name.split(".")[0], threshold=threshold)
 
+
+    # Plot training loss and validation metrics 
     plt.plot(train_loss_logger, label = "training losses")
     plt.plot(val_metrics['precision'], label = "validation precision")
     plt.plot(val_metrics['recall'], label = "validation recall")
