@@ -21,6 +21,8 @@ from PIL import Image
 from PIL import ImageDraw
 from img_draw import DrawModule
 
+from matplotlib import pyplot as plt
+
 def match_bboxes(IoU, threshold=0.5):
     # Matches predicted boxes to target boxes above a set threshold
     matches = []
@@ -365,11 +367,14 @@ def main():
         test_path = os.path.join(test_folder, name)
         output_test_image(test_path, model, device, transform, drawmodule, idx=name.split(".")[0], threshold=threshold)
 
-    # plt.plot(train_loss_logger, label = "training losses")
-    # plt.plot(val_loss_logger, label = "validation losses")
-    # plt.legend()
-    # plt.title("losses over epoch")
-    # plt.show()
+    plt.plot(train_loss_logger, label = "training losses")
+    plt.plot(val_metrics['precision'], label = "validation precision")
+    plt.plot(val_metrics['recall'], label = "validation recall")
+    plt.plot(val_metrics['mean_iou'], label = "validation mIoU")
+    plt.plot(val_metrics['class_accuracy'], label = "validation class accuracy")
+    plt.legend()
+    plt.title("test losses over epoch")
+    plt.show()
 
     return
 
