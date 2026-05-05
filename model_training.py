@@ -120,7 +120,7 @@ def train_model(model, dataLoader, optimizer, device, iou_module,
         
         objectness_loss = objectness_criterion(objectness_logits, object_exists)
 
-        loss = 4 * reg_loss + class_loss + objectness_loss
+        loss = 2 * reg_loss + class_loss + objectness_loss
 
         # Backpropagation and optimization step
         loss.backward()
@@ -133,10 +133,15 @@ def train_model(model, dataLoader, optimizer, device, iou_module,
     return running_loss / len(dataLoader)
 
 # Validate over one epoch
-def evaluate_model(model, dataLoader, device, iou_module, threshold,
-                reg_criterion, class_criterion, objectness_criterion, val_loss_logger, epoch=None):
+def evaluate_model(model, dataLoader, device, iou_module, iou_threshold, confidence_threshold, epoch=None):
     model.eval()
-    running_loss = 0.0
+
+    # Metrics
+    total_matches = 0
+    total_predictions = 0
+    total_targets = 0
+    total_iou = 0.0
+    correct_classes = 0
 
     # tqdm for visualizing progress
     if epoch is not None:
@@ -145,54 +150,82 @@ def evaluate_model(model, dataLoader, device, iou_module, threshold,
         loop = tqdm(dataLoader, desc="Validation", leave=True)
 
     with torch.no_grad():
-        for batch_idx, (images, target_bboxes, target_labels) in enumerate(loop):
-            images, target_bboxes, target_labels = images.to(device), target_bboxes.to(device), target_labels.to(device).long()
+        for images, target_bboxes, target_labels in loop:
+            images = images.to(device), target_bboxes = target_bboxes.to(device),target_labels = target_labels.to(device).long()
             pred_bboxes, class_logits, objectness_logits = model(images)
 
+            objectness_scores = torch.sigmoid(objectness_logits).squeeze(-1)
+            class_probs = torch.softmax(class_logits, dim=-1)
+            class_scores, pred_labels = torch.max(class_probs, dim=-1)
+            final_scores = objectness_scores * class_scores
+
             batch_size = images.shape[0]
-            match_count = 0
-            object_exists = torch.zeros_like(objectness_logits)
-            reg_loss = torch.tensor(0.0, device=device)
-            class_loss = torch.tensor(0.0, device=device)
 
-            # Iterate over the batch and compute loss for bounding boxes and labels
             for i in range(batch_size):
-                # Ignore padded boxes
-                real_target_bboxes = target_bboxes[i][target_labels[i] != -1]
-                real_target_labels = target_labels[i][target_labels[i] != -1]
+                valid_target_mask = target_labels[i] != -1
+                real_target_bboxes = target_bboxes[i][valid_target_mask]
+                real_target_labels = target_labels[i][valid_target_mask]
 
-                IoU = iou_module(pred_bboxes[i], real_target_bboxes)
-                # Use thresholded matching for evaluation to reflect actual performance at a given IoU threshold
-                matches = match_bboxes(IoU, threshold=threshold)
+                # Filter our images below the confidence threshold before evaluation
+                keep = final_scores[i] > confidence_threshold
+                kept_pred_bboxes = pred_bboxes[i][keep]
+                kept_pred_labels = pred_labels[i][keep]
 
+                num_targets = real_target_bboxes.shape[0]
+                num_predictions = kept_pred_bboxes.shape[0]
+                total_targets += num_targets
+                total_predictions += num_predictions
+
+                # Skip batch if no targets
+                if num_targets == 0 or num_predictions == 0:
+                    continue
+
+                IoU = iou_module(kept_pred_bboxes, real_target_bboxes)
+
+                matches = match_bboxes(IoU, threshold=iou_threshold)
+
+                total_matches += len(matches)
+
+                # Count the number of correct class predictions and sum IoU scores for matched boxes
                 for pred_idx, target_idx, iou_score in matches:
-                    # Object found in this box
-                    object_exists[i, pred_idx] = 1
+                    total_iou += iou_score
+                    if kept_pred_labels[pred_idx] == real_target_labels[target_idx]:
+                        correct_classes += 1
 
-                    # Compute regression and classification loss for this matched box
-                    reg_loss += reg_criterion(pred_bboxes[i, pred_idx], real_target_bboxes[target_idx])
-                    class_loss += class_criterion(class_logits[i, pred_idx].unsqueeze(0), real_target_labels[target_idx].unsqueeze(0))
-                    match_count += 1
+            # Evaluation metrics 
 
-            # If no matches, then train only for objectness loss
-            if match_count > 0:
-                reg_loss /= match_count
-                class_loss /= match_count
-            else:
-                reg_loss = torch.tensor(0.0, device=device)
-                class_loss = torch.tensor(0.0, device=device)
-            
-            objectness_loss = objectness_criterion(objectness_logits, object_exists)
+            # % of correct predictions
+            precision = total_matches / (total_predictions + 1e-5)
 
-            loss = 4 * reg_loss + class_loss + objectness_loss
-            running_loss += loss.item()
+            # % of targets detected
+            recall = total_matches / (total_targets + 1e-5)
 
-            # Log average per batch val loss for plotting
-            val_loss_logger.append(running_loss / (batch_idx + 1))
+            # Average IoU across matched boxes
+            mean_iou = total_iou / (total_matches + 1e-5)
 
-    return running_loss / len(dataLoader)
+            # % of matched boxes with correct class prediction
+            class_accuracy = correct_classes / (total_matches + 1e-5)
 
-# Custom collate function to pad batches since images have varying numbers of bboxes
+            loop.set_postfix({
+                "precision": f"{precision:.3f}",
+                "recall": f"{recall:.3f}",
+                "mIoU": f"{mean_iou:.3f}",
+                "cls_acc": f"{class_accuracy:.3f}"
+            })
+
+    precision = total_matches / (total_predictions + 1e-5)
+    recall = total_matches / (total_targets + 1e-5)
+    mean_iou = total_iou / (total_matches + 1e-5)
+    class_accuracy = correct_classes / (total_matches + 1e-5)
+
+    return {
+        "precision": precision,
+        "recall": recall,
+        "mean_iou": mean_iou,
+        "class_accuracy": class_accuracy,
+    }
+
+# Custom collate function to pad batches since images may have varying numbers of bboxes
 def multibox_collate(batch):
     images, boxes, labels = zip(*batch)
     images = torch.stack(images, dim=0)
@@ -216,7 +249,7 @@ def multibox_collate(batch):
     return images, padded_bboxes, padded_labels
 
 # Draw the bounding boxes for a single image from the test set
-def output_test_image(test_path, model, device, transform, drawmodule, idx, threshold=0.5):
+def output_test_image(test_path, model, device, transform, drawmodule, idx, threshold):
     test_image = Image.open(test_path).convert("RGB")
 
     with torch.no_grad():
@@ -244,7 +277,7 @@ def main():
     # Dataset specific parameters
     num_classes = 11
     num_bboxes = 8
-    threshold = 0.5
+    threshold = 0.4
 
     # Base model for feature extraction
     resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -260,7 +293,7 @@ def main():
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95)
 
     iou_module = IoUModule().to(device)
-    train_loss_logger, val_loss_logger = [], []
+    train_loss_logger = []
 
     # Loss functions for each part of detection pipeline
     reg_criterion = nn.SmoothL1Loss()
@@ -282,6 +315,7 @@ def main():
             std=[0.229, 0.224, 0.225]
         )])
 
+    # Dataset structure in typical format for YOLO models
     dataset_root = "detect_dataset"
     train_dataset = CustomDataset(
         images_dir=f"{dataset_root}/images/train",
@@ -300,14 +334,14 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, collate_fn=multibox_collate)
 
     # Training loop
-    num_epochs = 10
+    num_epochs = 30
     for epoch in range(num_epochs):
-        train_loss = train_model(model, train_loader, optimizer, device, iou_module,
-                                 reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=epoch+1)
-        val_loss = evaluate_model(model, val_loader, device, iou_module, threshold,
-                                  reg_criterion, class_criterion, objectness_criterion, val_loss_logger, epoch=epoch+1)
+        train_loss = train_model(model, train_loader, optimizer, device, iou_module, reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=epoch+1)
+        val_metrics = evaluate_model(model, val_loader, device, iou_module, threshold, threshold, epoch=epoch+1)
         scheduler.step()
-        print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
+
+        print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}")
+        print(f"Validation Metrics: Precision: {val_metrics['precision']:.4f}, Recall: {val_metrics['recall']:.4f}, mIoU: {val_metrics['mean_iou']:.4f}, Class Accuracy: {val_metrics['class_accuracy']:.4f}")
 
     # Run the model on the test images and draw the outputs
     transform = transforms.Compose([
