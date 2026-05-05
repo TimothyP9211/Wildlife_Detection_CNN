@@ -135,7 +135,8 @@ def train_model(model, dataLoader, optimizer, device, iou_module,
     return running_loss / len(dataLoader)
 
 # Validate over one epoch
-def evaluate_model(model, dataLoader, device, iou_module, iou_threshold, confidence_threshold, epoch=None):
+def evaluate_model(model, dataLoader, device, iou_module, iou_threshold, confidence_threshold, epoch=None,
+                   val_precision_logger=None, val_recall_logger=None, val_miou_logger=None, val_class_accuracy_logger=None):
     model.eval()
 
     # Metrics
@@ -153,7 +154,7 @@ def evaluate_model(model, dataLoader, device, iou_module, iou_threshold, confide
 
     with torch.no_grad():
         for images, target_bboxes, target_labels in loop:
-            images = images.to(device), target_bboxes = target_bboxes.to(device),target_labels = target_labels.to(device).long()
+            images, target_bboxes, target_labels  = images.to(device), target_bboxes.to(device), target_labels.to(device).long()
             pred_bboxes, class_logits, objectness_logits = model(images)
 
             objectness_scores = torch.sigmoid(objectness_logits).squeeze(-1)
@@ -215,17 +216,22 @@ def evaluate_model(model, dataLoader, device, iou_module, iou_threshold, confide
                 "cls_acc": f"{class_accuracy:.3f}"
             })
 
+            # Log validation metrics for plotting
+            if val_precision_logger is not None:
+                val_precision_logger.append(precision)
+            if val_recall_logger is not None:
+                val_recall_logger.append(recall)
+            if val_miou_logger is not None:
+                val_miou_logger.append(mean_iou)
+            if val_class_accuracy_logger is not None:
+                val_class_accuracy_logger.append(class_accuracy)
+
     precision = total_matches / (total_predictions + 1e-5)
     recall = total_matches / (total_targets + 1e-5)
     mean_iou = total_iou / (total_matches + 1e-5)
     class_accuracy = correct_classes / (total_matches + 1e-5)
 
-    return {
-        "precision": precision,
-        "recall": recall,
-        "mean_iou": mean_iou,
-        "class_accuracy": class_accuracy,
-    }
+    return {"precision": precision, "recall": recall,"mean_iou": mean_iou,"class_accuracy": class_accuracy,}
 
 # Custom collate function to pad batches since images may have varying numbers of bboxes
 def multibox_collate(batch):
@@ -274,12 +280,11 @@ def output_test_image(test_path, model, device, transform, drawmodule, idx, thre
 
     drawmodule.draw_predictions(test_path, final_bboxes, final_labels, final_scores, output_path=f"output/test_output_{idx}.jpg")
 
-
 def main():
     # Dataset specific parameters
     num_classes = 7
     num_bboxes = 8
-    threshold = 0.4
+    threshold = 0.45
 
     # Base model for feature extraction
     resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -295,7 +300,7 @@ def main():
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95)
 
     iou_module = IoUModule().to(device)
-    train_loss_logger = []
+    train_loss_logger, val_precision_logger, val_recall_logger, val_miou_logger, val_class_accuracy_logger = [], [], [], [], []
 
     # Loss functions for each part of detection pipeline
     reg_criterion = nn.SmoothL1Loss()
@@ -307,17 +312,15 @@ def main():
     # Augmentation for training set, does not alter bounding boxes (ie no geometric transforms)
     train_transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-        transforms.RandomAutocontrast(p=0.3),
-        transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.3),
-        transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0)),
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
+        transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.95)),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
             std=[0.229, 0.224, 0.225]
         )])
 
-    # Dataset structure in typical format for YOLO models
+    # Dataset structure in typical format for YOLO datasets
     dataset_root = "detect_dataset"
     train_dataset = CustomDataset(
         images_dir=f"{dataset_root}/images/train",
@@ -331,21 +334,45 @@ def main():
         transform=None,
         image_size=224
     )
+    test_dataset = CustomDataset(
+        images_dir=f"{dataset_root}/images/test",
+        labels_dir=f"{dataset_root}/labels/test",
+        transform=None,
+        image_size=224
+    )
 
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=multibox_collate)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, collate_fn=multibox_collate)
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, collate_fn=multibox_collate)
 
     # Training loop
     num_epochs = 30
+    best_val_loss = float("inf")
+    best_model_path = "model/best.pth"
     for epoch in range(num_epochs):
         train_loss = train_model(model, train_loader, optimizer, device, iou_module, reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=epoch+1)
-        val_metrics = evaluate_model(model, val_loader, device, iou_module, threshold, threshold, epoch=epoch+1)
+        val_metrics = evaluate_model(model, val_loader, device, iou_module, threshold, threshold, epoch=epoch+1, 
+                                    val_precision_logger=val_precision_logger, val_recall_logger=val_recall_logger, 
+                                    val_miou_logger=val_miou_logger, val_class_accuracy_logger=val_class_accuracy_logger)
         scheduler.step()
+
+        # Weighted loss combining all val metrics for selecting the best performing model
+        val_loss = 2 * (1 - val_metrics["mean_iou"]) + (1 - val_metrics["class_accuracy"]) + (1 - val_metrics["precision"]) + (1 - val_metrics["recall"])
+
+        # Save best model if the validation loss is better
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), best_model_path)
 
         print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}")
         print(f"Validation Metrics: Precision: {val_metrics['precision']:.4f}, Recall: {val_metrics['recall']:.4f}, mIoU: {val_metrics['mean_iou']:.4f}, Class Accuracy: {val_metrics['class_accuracy']:.4f}")
 
-    # Run the model on the test images and draw the outputs
+    # Load the best model for testing
+    model.load_state_dict(torch.load(best_model_path))
+    model.to(device)
+    model.eval()
+
+    # Run the best model on the test images and draw the outputs
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -367,15 +394,24 @@ def main():
         test_path = os.path.join(test_folder, name)
         output_test_image(test_path, model, device, transform, drawmodule, idx=name.split(".")[0], threshold=threshold)
 
+    # Evaluate the model on the test set
+    test_metrics = evaluate_model(model, test_loader, device, iou_module, threshold, threshold)
+    print(f"Test Metrics: Precision: {test_metrics['precision']:.4f}, Recall: {test_metrics['recall']:.4f}, mIoU: {test_metrics['mean_iou']:.4f}, Class Accuracy: {test_metrics['class_accuracy']:.4f}")
 
     # Plot training loss and validation metrics 
+    plt.figure()
     plt.plot(train_loss_logger, label = "training losses")
-    plt.plot(val_metrics['precision'], label = "validation precision")
-    plt.plot(val_metrics['recall'], label = "validation recall")
-    plt.plot(val_metrics['mean_iou'], label = "validation mIoU")
-    plt.plot(val_metrics['class_accuracy'], label = "validation class accuracy")
     plt.legend()
     plt.title("test losses over epoch")
+
+    plt.figure()
+    plt.plot(val_precision_logger, label = "validation precision")
+    plt.plot(val_recall_logger, label = "validation recall")
+    plt.plot(val_miou_logger, label = "validation mIoU")
+    plt.plot(val_class_accuracy_logger, label = "validation class accuracy")
+    plt.legend()
+    plt.title("Validation Metrics over Epoch")
+    
     plt.show()
 
     return

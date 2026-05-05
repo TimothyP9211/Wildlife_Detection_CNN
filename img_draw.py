@@ -1,5 +1,6 @@
 from PIL import Image, ImageDraw, ImageFont
 
+# Draw predicted bounding boxes and labels on the image
 class DrawModule():
     def __init__(self, font_size=32):
         self.font_size = font_size
