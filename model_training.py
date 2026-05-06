@@ -23,6 +23,17 @@ from img_draw import DrawModule
 
 from matplotlib import pyplot as plt
 
+# Weights for loss calculation for the components of the loss function
+classifier_weight = 1.0
+regressor_weight = 1.0
+objectness_weight = 2.0
+
+# Weights for loss calculation for the validation metrics
+miou_weight = 1.0
+class_acc_weight = 0.0
+precision_weight = 1.0
+recall_weight = 1.0
+
 def match_bboxes(IoU, threshold=0.5):
     # Matches predicted boxes to target boxes above a set threshold
     matches = []
@@ -122,7 +133,8 @@ def train_model(model, dataLoader, optimizer, device, iou_module,
         
         objectness_loss = objectness_criterion(objectness_logits, object_exists)
 
-        loss = 2 * reg_loss + class_loss + objectness_loss
+        # Loss function
+        loss = regressor_weight * reg_loss + classifier_weight * class_loss + objectness_weight * objectness_loss
 
         # Backpropagation and optimization step
         loss.backward()
@@ -216,20 +228,20 @@ def evaluate_model(model, dataLoader, device, iou_module, iou_threshold, confide
                 "cls_acc": f"{class_accuracy:.3f}"
             })
 
-            # Log validation metrics for plotting
-            if val_precision_logger is not None:
-                val_precision_logger.append(precision)
-            if val_recall_logger is not None:
-                val_recall_logger.append(recall)
-            if val_miou_logger is not None:
-                val_miou_logger.append(mean_iou)
-            if val_class_accuracy_logger is not None:
-                val_class_accuracy_logger.append(class_accuracy)
-
     precision = total_matches / (total_predictions + 1e-5)
     recall = total_matches / (total_targets + 1e-5)
     mean_iou = total_iou / (total_matches + 1e-5)
     class_accuracy = correct_classes / (total_matches + 1e-5)
+
+    # Log validation metrics for plotting
+    if val_precision_logger is not None:
+        val_precision_logger.append(precision)
+    if val_recall_logger is not None:
+        val_recall_logger.append(recall)
+    if val_miou_logger is not None:
+        val_miou_logger.append(mean_iou)
+    if val_class_accuracy_logger is not None:
+        val_class_accuracy_logger.append(class_accuracy)
 
     return {"precision": precision, "recall": recall,"mean_iou": mean_iou,"class_accuracy": class_accuracy,}
 
@@ -284,7 +296,7 @@ def main():
     # Dataset specific parameters
     num_classes = 7
     num_bboxes = 8
-    threshold = 0.45
+    threshold = 0.40
 
     # Base model for feature extraction
     resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -351,13 +363,13 @@ def main():
     best_model_path = "model/best.pth"
     for epoch in range(num_epochs):
         train_loss = train_model(model, train_loader, optimizer, device, iou_module, reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=epoch+1)
-        val_metrics = evaluate_model(model, val_loader, device, iou_module, threshold, threshold, epoch=epoch+1, 
+        val_metrics = evaluate_model(model, val_loader, device, iou_module, threshold, confidence_threshold=0.5, epoch=epoch+1, 
                                     val_precision_logger=val_precision_logger, val_recall_logger=val_recall_logger, 
                                     val_miou_logger=val_miou_logger, val_class_accuracy_logger=val_class_accuracy_logger)
         scheduler.step()
 
         # Weighted loss combining all val metrics for selecting the best performing model
-        val_loss = 2 * (1 - val_metrics["mean_iou"]) + (1 - val_metrics["class_accuracy"]) + (1 - val_metrics["precision"]) + (1 - val_metrics["recall"])
+        val_loss = miou_weight * (1 - val_metrics["mean_iou"]) + class_acc_weight * (1 - val_metrics["class_accuracy"]) + precision_weight * (1 - val_metrics["precision"]) + recall_weight * (1 - val_metrics["recall"])
 
         # Save best model if the validation loss is better
         if val_loss < best_val_loss:
@@ -411,7 +423,7 @@ def main():
     plt.plot(val_class_accuracy_logger, label = "validation class accuracy")
     plt.legend()
     plt.title("Validation Metrics over Epoch")
-    
+
     plt.show()
 
     return

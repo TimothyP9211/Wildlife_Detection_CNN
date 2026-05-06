@@ -1,8 +1,11 @@
 from PIL import Image, ImageDraw, ImageFont
 
+
+
 # Draw predicted bounding boxes and labels on the image
 class DrawModule():
     def __init__(self, font_size=32):
+        self.class_to_names = {0:"Deer", 1:"Moose", 2:"Bear", 3:"Fox", 4:"Wolf", 5:"Bison", 6:"Squirrel"}
         self.font_size = font_size
         try:
             self.font = ImageFont.truetype("arial.ttf", self.font_size)
@@ -25,7 +28,8 @@ class DrawModule():
 
         for box, label, score in zip(pixel_boxes, labels.cpu(), scores.cpu()):
             x, y, w, h = box.tolist()
-            text = f"class {label.item()} {score.item():.2f}"
+            animal_name = self.class_to_names[int(label.item())]
+            text = f"{animal_name} {score.item():.2f}"
             draw.rectangle([x, y, x + w, y + h],outline="red",width=4)
             draw.text((x, y),text,fill="red",font=self.font)
 
