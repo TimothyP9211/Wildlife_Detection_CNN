@@ -25,8 +25,8 @@ from matplotlib import pyplot as plt
 
 # Weights for loss calculation for the components of the loss function
 classifier_weight = 1.0
-regressor_weight = 1.0
-objectness_weight = 2.0
+regressor_weight = 2.0
+objectness_weight = 1.0
 
 # Weights for loss calculation for the validation metrics
 miou_weight = 1.0
@@ -296,7 +296,7 @@ def main():
     # Dataset specific parameters
     num_classes = 7
     num_bboxes = 8
-    threshold = 0.40
+    threshold = 0.45
 
     # Base model for feature extraction
     resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
@@ -363,7 +363,7 @@ def main():
     best_model_path = "model/best.pth"
     for epoch in range(num_epochs):
         train_loss = train_model(model, train_loader, optimizer, device, iou_module, reg_criterion, class_criterion, objectness_criterion, train_loss_logger, epoch=epoch+1)
-        val_metrics = evaluate_model(model, val_loader, device, iou_module, threshold, confidence_threshold=0.5, epoch=epoch+1, 
+        val_metrics = evaluate_model(model, val_loader, device, iou_module, threshold, confidence_threshold=0.45, epoch=epoch+1, 
                                     val_precision_logger=val_precision_logger, val_recall_logger=val_recall_logger, 
                                     val_miou_logger=val_miou_logger, val_class_accuracy_logger=val_class_accuracy_logger)
         scheduler.step()
@@ -414,7 +414,7 @@ def main():
     plt.figure()
     plt.plot(train_loss_logger, label = "training losses")
     plt.legend()
-    plt.title("test losses over epoch")
+    plt.title("Test Loss over Time (Batches)")
 
     plt.figure()
     plt.plot(val_precision_logger, label = "validation precision")

@@ -44,8 +44,8 @@ if __name__ == "__main__":
     # labels_directory = "detect_dataset/fox/labels"
     # labels_directory = "detect_dataset/moose/labels"
     # labels_directory = "detect_dataset/wolf/labels"
-    # labels_directory = "tmp_labels/"
-    labels_directory = "detect_dataset/squirrel/labels"
-    class_id_to_use = 6
+    labels_directory = "tmp_labels/"
+    # labels_directory = "detect_dataset/squirrel/labels"
+    class_id_to_use = 1
 
     replace_yolo_class_ids(labels_directory, class_id_to_use)

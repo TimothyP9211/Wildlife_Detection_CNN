@@ -7,5 +7,5 @@ __pycache__/
 
 classify_dataset/
 detect_dataset/
-output/
 tmp_labels/
+output/
