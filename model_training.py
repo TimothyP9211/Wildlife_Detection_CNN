@@ -24,13 +24,13 @@ from img_draw import DrawModule
 from matplotlib import pyplot as plt
 
 # Weights for loss calculation for the components of the loss function
-classifier_weight = 1.0
-regressor_weight = 2.0
-objectness_weight = 1.0
+classifier_weight = 3.0
+regressor_weight = 1.0
+objectness_weight = 1.5
 
 # Weights for loss calculation for the validation metrics
-miou_weight = 1.0
-class_acc_weight = 0.0
+miou_weight = 0.5
+class_acc_weight = 2.0
 precision_weight = 1.0
 recall_weight = 1.0
 
@@ -63,7 +63,8 @@ def match_bboxes(IoU, threshold=0.5):
     return matches
 
 def match_bboxes_best(IoU):
-    # Matches each target box to the predicted box with the highest IoU without a threshold
+    # Matches each target box to the predicted box with the highest IoU without a threshold 
+    # Use for early training where predictions are not great
     matches = []
     if IoU.numel() == 0:
         return matches
@@ -228,6 +229,7 @@ def evaluate_model(model, dataLoader, device, iou_module, iou_threshold, confide
                 "cls_acc": f"{class_accuracy:.3f}"
             })
 
+    # Final metric calculations for this epoch
     precision = total_matches / (total_predictions + 1e-5)
     recall = total_matches / (total_targets + 1e-5)
     mean_iou = total_iou / (total_matches + 1e-5)
@@ -276,6 +278,7 @@ def output_test_image(test_path, model, device, transform, drawmodule, idx, thre
         input_tensor = transform(test_image).unsqueeze(0).to(device)
         pred_bboxes, class_logits, objectness_logits = model(input_tensor)  
 
+    # Filter the predictions by confidence threshold     
     pred_bboxes = pred_bboxes[0]                 
     class_logits = class_logits[0]               
     objectness_logits = objectness_logits[0]
@@ -301,7 +304,7 @@ def main():
     # Base model for feature extraction
     resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
 
-    # Initialize detector model and use cuda for faster training if available
+    # Initialize detector model and use CUDA for faster training if available
     model = DetectorModel(baseModel=resnet, numClasses=num_classes, numBBoxes=num_bboxes)
     print(f"cuda available: {torch.cuda.is_available()}")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

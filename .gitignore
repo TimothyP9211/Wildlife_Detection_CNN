@@ -9,3 +9,5 @@ classify_dataset/
 detect_dataset/
 tmp_labels/
 output/
+
+test_torch.py
