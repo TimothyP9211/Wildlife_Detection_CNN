@@ -70,7 +70,7 @@ Taken together, the overall validation loss given by a weighted sum of each of t
 ## Test Results
 
 ![test loss](figures/Test_loss.png)  
-*Figure 3: Test loss across each batch iteration*
+*Figure 3: Training loss across each batch iteration*
 
 ![val metrics](figures/Val_metrics.png)  
 *Figure 4: Validation metrics across epochs*
