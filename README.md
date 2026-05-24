@@ -63,7 +63,7 @@ Taken together, the overall validation loss given by a weighted sum of each of t
 
 ### Additional Design Choices
 * Trained for 30 epochs
-* Used Adam as the optimizer with learning rate of 0.0001 with a dynamic learning rate scheduler
+* Used Adam as the optimizer with a dynamic learning rate scheduler
 * Transformed and normalized the data to 224x224 which is used by ResNet50
 * Applied Augmentation on the dataset to increase the dataset diversity, specifically ColorJitter and GaussianBlur
 
