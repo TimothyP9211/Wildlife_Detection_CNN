@@ -53,7 +53,7 @@ The overall training loss is a weighted sum of these individual loss functions:
 #### Mean IoU
 The Intersection Over Union (IoU) is a popular metric for evalualting the performance of a detector model. It is simply the area of the intersection over of area of the union between predicted and target bounding boxes which is a value between 0 and 1 (higher IoU = better prediction). For this specific project, IoU was used not only as an evaluation metric, but also for matching bounding boxes between target and model predictions. The **mean IoU** is the average over all the predicted bounding boxes that the model detects, indicating regressor performance. 
 #### Precision and Recall
-Precision is measure of the % of positive predictions which are actually positive in the image, taking a large penalty from false positives. Meanwhile Recall is the % of objects detected by the model out of the object that are actually in the image, taking a large penalty from false negatives. The harmonic mean of Precision and Recall is the F1 score which establishes a balanced consideration of both. 
+Precision is a measure of the % of positive predictions which are actually positive in the image, taking a large penalty from false positives. Meanwhile Recall is the % of objects detected by the model out of the object that are actually in the image, taking a large penalty from false negatives. The harmonic mean of Precision and Recall is the F1 score which establishes a balanced consideration of both. 
 #### Class Accuracy
 Class accuracy is simply the overall accuracy of the predicted classes for each object, indicating object classifier performance.
 
